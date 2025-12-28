@@ -22,17 +22,22 @@ let sidebarVisible = true;
 // Variable to track current theme
 let currentTheme = 'light';
 
+// Variable to track sidebar transparency
+let sidebarTransparency = 95;
+
 // Initialize sidebar when DOM is ready
 if (document.readyState === 'loading') {
   document.addEventListener('DOMContentLoaded', () => {
     initializeSidebar();
     loadSidebarVisibility();
     loadTheme();
+    loadSidebarTransparency();
   });
 } else {
   initializeSidebar();
   loadSidebarVisibility();
   loadTheme();
+  loadSidebarTransparency();
 }
 
 // Load sidebar visibility state from storage
@@ -55,7 +60,9 @@ function applySidebarVisibility() {
 
 // Toggle sidebar visibility
 function toggleSidebarVisibility() {
+  console.log('Toggling sidebar visibility. Current state:', sidebarVisible);
   sidebarVisible = !sidebarVisible;
+  console.log('New sidebar state:', sidebarVisible);
   applySidebarVisibility();
   
   // Save to storage
@@ -167,6 +174,15 @@ function handleContextSelection(providedText = null) {
 function handleKeyboardShortcut(event) {
   const isCtrlOrMeta = event.ctrlKey || event.metaKey;
   const isAlt = event.altKey;
+  
+  // Check for '9' key to toggle sidebar visibility (no modifiers)
+  if (event.key === 'F9' && !isCtrlOrMeta && !isAlt && !event.shiftKey) {
+    console.log('F9 key pressed - toggling sidebar visibility');
+    event.preventDefault();
+    event.stopPropagation();
+    toggleSidebarVisibility();
+    return;
+  }
   
   // Check for Ctrl+Alt+NumpadSubtract (initial selection)
   if (isCtrlOrMeta && isAlt && event.code === 'NumpadSubtract') {
@@ -535,6 +551,36 @@ async function loadTheme() {
   }
 }
 
+// Load sidebar transparency from storage
+async function loadSidebarTransparency() {
+  try {
+    const result = await chrome.storage.sync.get(['sidebarTransparency']);
+    sidebarTransparency = result.sidebarTransparency || 95;
+    applySidebarTransparency();
+  } catch (error) {
+    console.error('Error loading sidebar transparency:', error);
+    sidebarTransparency = 95;
+    applySidebarTransparency();
+  }
+}
+
+// Apply transparency to sidebar container
+function applySidebarTransparency() {
+  if (sidebarContainer) {
+    // Convert transparency percentage to alpha value (0 = transparent, 100 = opaque)
+    const alpha = sidebarTransparency / 100;
+    
+    // Get current theme colors
+    const isDark = currentTheme === 'dark';
+    const bgColor = isDark ? '45, 45, 45' : '255, 255, 255';
+    
+    // Apply transparency only to the main sidebar container
+    sidebarContainer.style.background = `rgba(${bgColor}, ${alpha})`;
+    
+    console.log(`Applied transparency: ${sidebarTransparency}% (alpha: ${alpha})`);
+  }
+}
+
 // Apply theme to sidebar and cards
 function applyTheme(theme) {
   currentTheme = theme;
@@ -739,7 +785,7 @@ function addPlaceholderCard() {
       line-height: 1;
       transition: color 150ms ease;
     ">×</button>
-    <h3 style="margin: 0 0 8px 0; font-size: 18px; font-weight: 600; color: ${headingColor};">${headingText}</h3>
+    <h3 class="context-explainer-card-title" style="margin: 0 0 8px 0; font-size: 18px; font-weight: 600; color: ${headingColor}; cursor: pointer;">${headingText}</h3>
     <p class="context-explainer-card-body" style="margin: 0; font-size: 14px; color: ${bodyColor}; line-height: 1.5;">Loading explanation...</p>
   `;
   
@@ -770,8 +816,9 @@ function addPlaceholderCard() {
   card.dataset.initialText = InitialText || 'Unknown';
   card.dataset.timestamp = currentTime;
   
-  // Add click event listener to card (but not on close button)
-  card.addEventListener('click', (e) => {
+  // Add click event listener to title only
+  const title = card.querySelector('.context-explainer-card-title');
+  title.addEventListener('click', (e) => {
     // Don't trigger if clicking the close button
     if (e.target.classList.contains('context-explainer-card-close')) {
       return;
@@ -779,9 +826,6 @@ function addPlaceholderCard() {
     // Show popup with card details
     showCardPopup(card);
   });
-  
-  // Add cursor pointer to indicate card is clickable
-  card.style.cursor = 'pointer';
   
   // Add card to scrollable content area
   if (sidebarContentArea) {

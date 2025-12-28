@@ -3,25 +3,39 @@ document.addEventListener('DOMContentLoaded', async () => {
   const result = await chrome.storage.sync.get({
     enabled: true,
     popupDelay: 300,
-    popupPosition: 'below'
+    popupPosition: 'below',
+    sidebarTransparency: 95
   });
 
   document.getElementById('enabled').value = result.enabled.toString();
   document.getElementById('popupDelay').value = result.popupDelay;
   document.getElementById('popupPosition').value = result.popupPosition;
+  document.getElementById('sidebarTransparency').value = result.sidebarTransparency;
+  updateTransparencyDisplay(result.sidebarTransparency);
 });
+
+// Update transparency value display
+document.getElementById('sidebarTransparency').addEventListener('input', (e) => {
+  updateTransparencyDisplay(e.target.value);
+});
+
+function updateTransparencyDisplay(value) {
+  document.getElementById('transparencyValue').textContent = `${value}%`;
+}
 
 // Save settings
 document.getElementById('saveBtn').addEventListener('click', async () => {
   const enabled = document.getElementById('enabled').value === 'true';
   const popupDelay = parseInt(document.getElementById('popupDelay').value);
   const popupPosition = document.getElementById('popupPosition').value;
+  const sidebarTransparency = parseInt(document.getElementById('sidebarTransparency').value);
 
   try {
     await chrome.storage.sync.set({
       enabled,
       popupDelay,
-      popupPosition
+      popupPosition,
+      sidebarTransparency
     });
 
     showStatus('Settings saved successfully!', 'success');
@@ -31,7 +45,7 @@ document.getElementById('saveBtn').addEventListener('click', async () => {
     if (tabs[0]) {
       chrome.tabs.sendMessage(tabs[0].id, {
         action: 'settingsUpdated',
-        settings: { enabled, popupDelay, popupPosition }
+        settings: { enabled, popupDelay, popupPosition, sidebarTransparency }
       });
     }
   } catch (error) {
