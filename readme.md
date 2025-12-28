@@ -1,0 +1,1 @@
+Chrome extension to explain highlighted text
