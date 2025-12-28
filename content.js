@@ -12,6 +12,16 @@ let InitialText = null;
 // Variable for context selection
 let contextText = null;
 
+// Variable for sidebar container
+let sidebarContainer = null;
+
+// Initialize sidebar when DOM is ready
+if (document.readyState === 'loading') {
+  document.addEventListener('DOMContentLoaded', initializeSidebar);
+} else {
+  initializeSidebar();
+}
+
 // Keyboard event listener for Ctrl+Alt+NumpadSubtract
 document.addEventListener('keydown', handleKeyboardShortcut);
 
@@ -81,6 +91,9 @@ function handleKeyboardShortcut(event) {
       instructionOverlay.remove();
       instructionOverlay = null;
     }
+    
+    // Add placeholder card to sidebar
+    addPlaceholderCard();
   }
 }
 
@@ -229,6 +242,111 @@ function removeHighlightOverlay() {
     highlightOverlay.remove();
     highlightOverlay = null;
   }
+}
+
+// Initialize sidebar container
+function initializeSidebar() {
+  // Check if sidebar already exists
+  if (document.getElementById('context-explainer-sidebar')) {
+    sidebarContainer = document.getElementById('context-explainer-sidebar');
+    return;
+  }
+  
+  // Create sidebar container
+  sidebarContainer = document.createElement('div');
+  sidebarContainer.id = 'context-explainer-sidebar';
+  sidebarContainer.className = 'context-explainer-sidebar';
+  
+  // Style the sidebar
+  sidebarContainer.style.cssText = `
+    position: fixed;
+    top: 0;
+    right: 20px;
+    bottom: 0;
+    width: 350px;
+    background: rgba(255, 255, 255, 0.95);
+    box-shadow: -2px 0 8px rgba(0, 0, 0, 0.1);
+    z-index: 10000;
+    overflow-y: auto;
+    padding: 20px;
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+  `;
+  
+  // Add to page
+  document.body.appendChild(sidebarContainer);
+}
+
+// Add placeholder card to sidebar
+function addPlaceholderCard() {
+  // Ensure sidebar exists
+  if (!sidebarContainer) {
+    initializeSidebar();
+  }
+  
+  // Create card element
+  const card = document.createElement('div');
+  card.className = 'context-explainer-card';
+  
+  // Style the card (position: relative for absolute positioning of close button)
+  card.style.cssText = `
+    position: relative;
+    background: white;
+    border-radius: 8px;
+    padding: 16px;
+    margin-bottom: 16px;
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+    transition: opacity 200ms ease-out;
+  `;
+  
+  // Get current time in 24-hour format
+  const currentTime = new Date().toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: false });
+  
+  // Get the initial text (fallback to "Unknown" if not set)
+  const headingText = InitialText ? `${InitialText} - ${currentTime}` : `Unknown - ${currentTime}`;
+  
+  // Create card content with close button
+  card.innerHTML = `
+    <button class="context-explainer-card-close" style="
+      position: absolute;
+      top: 8px;
+      right: 8px;
+      background: none;
+      border: none;
+      font-size: 20px;
+      color: #999;
+      cursor: pointer;
+      padding: 4px 8px;
+      line-height: 1;
+      transition: color 150ms ease;
+    ">×</button>
+    <h3 style="margin: 0 0 8px 0; font-size: 18px; font-weight: 600; color: #333;">${headingText}</h3>
+    <p style="margin: 0; font-size: 14px; color: #666; line-height: 1.5;">This is a placeholder explanation card. Real explanations will appear here.</p>
+  `;
+  
+  // Add hover effect for close button
+  const closeButton = card.querySelector('.context-explainer-card-close');
+  closeButton.addEventListener('mouseenter', () => {
+    closeButton.style.color = '#333';
+  });
+  closeButton.addEventListener('mouseleave', () => {
+    closeButton.style.color = '#999';
+  });
+  
+  // Add click event listener to close button
+  closeButton.addEventListener('click', () => {
+    // Fade out animation
+    card.style.opacity = '0';
+    
+    // Remove from DOM after animation completes
+    setTimeout(() => {
+      if (card.parentNode) {
+        card.remove();
+      }
+    }, 200);
+  });
+  
+  // Add card to sidebar
+  sidebarContainer.appendChild(card);
 }
 
 // Add CSS animations via style tag if not already present
