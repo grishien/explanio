@@ -1,1 +1,1 @@
-Chrome extension to explain highlighted text
+Chrome extension to explain highlighted text 1
