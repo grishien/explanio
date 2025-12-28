@@ -50,3 +50,20 @@ function showStatus(message, type) {
   }, 3000);
 }
 
+// Toggle sidebar visibility
+document.getElementById('toggleSidebarBtn').addEventListener('click', async () => {
+  try {
+    const tabs = await chrome.tabs.query({ active: true, currentWindow: true });
+    if (tabs[0]) {
+      chrome.tabs.sendMessage(tabs[0].id, {
+        action: 'toggleSidebar'
+      });
+      showStatus('Sidebar visibility toggled', 'success');
+    } else {
+      showStatus('No active tab found', 'error');
+    }
+  } catch (error) {
+    showStatus('Error toggling sidebar: ' + error.message, 'error');
+  }
+});
+

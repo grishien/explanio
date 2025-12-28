@@ -14,16 +14,130 @@ let contextText = null;
 
 // Variable for sidebar container
 let sidebarContainer = null;
+let sidebarContentArea = null; // Scrollable content area for cards
+
+// Variable to track sidebar visibility state
+let sidebarVisible = true;
+
+// Variable to track current theme
+let currentTheme = 'light';
 
 // Initialize sidebar when DOM is ready
 if (document.readyState === 'loading') {
-  document.addEventListener('DOMContentLoaded', initializeSidebar);
+  document.addEventListener('DOMContentLoaded', () => {
+    initializeSidebar();
+    loadSidebarVisibility();
+    loadTheme();
+  });
 } else {
   initializeSidebar();
+  loadSidebarVisibility();
+  loadTheme();
 }
+
+// Load sidebar visibility state from storage
+async function loadSidebarVisibility() {
+  try {
+    const result = await chrome.storage.sync.get({ sidebarVisible: true });
+    sidebarVisible = result.sidebarVisible;
+    applySidebarVisibility();
+  } catch (error) {
+    console.error('Error loading sidebar visibility:', error);
+  }
+}
+
+// Apply sidebar visibility state
+function applySidebarVisibility() {
+  if (sidebarContainer) {
+    sidebarContainer.style.display = sidebarVisible ? 'block' : 'none';
+  }
+}
+
+// Toggle sidebar visibility
+function toggleSidebarVisibility() {
+  sidebarVisible = !sidebarVisible;
+  applySidebarVisibility();
+  
+  // Save to storage
+  chrome.storage.sync.set({ sidebarVisible: sidebarVisible }).catch(error => {
+    console.error('Error saving sidebar visibility:', error);
+  });
+}
+
+// Message listener for toggle action
+chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
+  if (request.action === 'toggleSidebar') {
+    toggleSidebarVisibility();
+    sendResponse({ success: true, visible: sidebarVisible });
+  }
+  return true; // Keep message channel open for async response
+});
 
 // Keyboard event listener for Ctrl+Alt+NumpadSubtract
 document.addEventListener('keydown', handleKeyboardShortcut);
+
+// Handle word selection (initial selection)
+function handleWordSelection() {
+  const selection = window.getSelection();
+  const text = selection.toString().trim();
+  
+  if (text && text.length > 3) {
+    // Store initial text in global variable
+    InitialText = text;
+    
+    // Capture the selected text and its position
+    captureSelection(selection, text);
+    
+    // Log to console
+    console.log('Initial selection:', text);
+    
+    // Add yellow/orange highlight overlay
+    addHighlightOverlay(selection);
+    
+    // Show instruction overlay
+    showInstructionOverlay();
+  } else {
+    console.log('Error: Please select at least 4 characters');
+  }
+}
+
+// Handle context selection
+function handleContextSelection() {
+  // Check if we have an initial selection
+  if (!capturedSelectionData) {
+    console.log('Error: No initial selection found. Please select a word/phrase first');
+    return;
+  }
+  
+  const selection = window.getSelection();
+  const context = selection.toString().trim();
+  
+  if (!context || context.length === 0) {
+    console.log('Error: No text selected for context');
+    return;
+  }
+  
+  // Validate that context includes the original selection
+  const originalText = capturedSelectionData.text;
+  if (!context.includes(originalText)) {
+    console.log('Error: Context must include the original selection');
+    return;
+  }
+  
+  // Validation passed - store context and log
+  contextText = context;
+  console.log('Context text:', context);
+  console.log('Original word/phrase:', originalText);
+  
+  // Remove instruction overlay
+  if (instructionOverlay) {
+    instructionOverlay.remove();
+    instructionOverlay = null;
+  }
+  
+  // Add placeholder card to sidebar
+  addPlaceholderCard();
+}
 
 // Handle keyboard shortcuts
 function handleKeyboardShortcut(event) {
@@ -34,66 +148,13 @@ function handleKeyboardShortcut(event) {
   if (isCtrlOrMeta && isAlt && event.code === 'NumpadSubtract') {
     event.preventDefault();
     event.stopPropagation();
-    
-    const selection = window.getSelection();
-    const text = selection.toString().trim();
-    
-    if (text && text.length > 3) {
-      // Store initial text in global variable
-      InitialText = text;
-      
-      // Capture the selected text and its position
-      captureSelection(selection, text);
-      
-      // Log to console
-      console.log('Initial selection:', text);
-      
-      // Add yellow/orange highlight overlay
-      addHighlightOverlay(selection);
-      
-      // Show instruction overlay
-      showInstructionOverlay();
-    }
+    handleWordSelection();
   }
   // Check for Ctrl+Alt+Numpad+ or Ctrl+Alt+= (context selection)
   else if (isCtrlOrMeta && isAlt && (event.code === 'NumpadAdd')) {
     event.preventDefault();
     event.stopPropagation();
-    
-    // Check if we have an initial selection
-    if (!capturedSelectionData) {
-      console.log('Error: No initial selection found. Please select a word/phrase first with Ctrl+Alt+Numpad-');
-      return;
-    }
-    
-    const selection = window.getSelection();
-    const context = selection.toString().trim();
-    
-    if (!context || context.length === 0) {
-      console.log('Error: No text selected for context');
-      return;
-    }
-    
-    // Validate that context includes the original selection
-    const originalText = capturedSelectionData.text;
-    if (!context.includes(originalText)) {
-      console.log('Error: Context must include the original selection');
-      return;
-    }
-    
-    // Validation passed - store context and log
-    contextText = context;
-    console.log('Context text:', context);
-    console.log('Original word/phrase:', originalText);
-    
-    // Remove instruction overlay
-    if (instructionOverlay) {
-      instructionOverlay.remove();
-      instructionOverlay = null;
-    }
-    
-    // Add placeholder card to sidebar
-    addPlaceholderCard();
+    handleContextSelection();
   }
 }
 
@@ -244,11 +305,107 @@ function removeHighlightOverlay() {
   }
 }
 
+// Create action button (helper function)
+function createActionButton(id, label, icon, onClickHandler) {
+  const button = document.createElement('button');
+  button.id = id;
+  button.className = 'context-explainer-action-button';
+  button.textContent = `${icon} ${label}`;
+  button.style.cssText = `
+    background: none;
+    border: 1px solid rgba(0, 0, 0, 0.2);
+    border-radius: 4px;
+    padding: 4px 8px;
+    font-size: 12px;
+    cursor: pointer;
+    transition: all 150ms ease;
+    color: #333;
+    margin-right: 6px;
+  `;
+  
+  button.addEventListener('mouseenter', () => {
+    const isDark = currentTheme === 'dark';
+    button.style.backgroundColor = isDark ? 'rgba(255, 255, 255, 0.1)' : 'rgba(0, 0, 0, 0.05)';
+  });
+  button.addEventListener('mouseleave', () => {
+    button.style.backgroundColor = 'transparent';
+  });
+  button.addEventListener('click', onClickHandler);
+  
+  return button;
+}
+
 // Initialize sidebar container
 function initializeSidebar() {
   // Check if sidebar already exists
   if (document.getElementById('context-explainer-sidebar')) {
     sidebarContainer = document.getElementById('context-explainer-sidebar');
+    sidebarContentArea = document.getElementById('context-explainer-sidebar-content');
+    
+    // Ensure button row exists, create if missing
+    let buttonRow = document.getElementById('context-explainer-button-row');
+    if (!buttonRow && sidebarContainer) {
+      buttonRow = document.createElement('div');
+      buttonRow.id = 'context-explainer-button-row';
+      buttonRow.className = 'context-explainer-button-row';
+      buttonRow.style.cssText = `
+        background-color: rgba(248, 249, 250, 0.95);
+        padding: 10px;
+        border-bottom: 1px solid rgba(0, 0, 0, 0.1);
+        display: flex;
+        flex-direction: row;
+        align-items: center;
+        flex-shrink: 0;
+      `;
+      
+      const themeToggleButton = document.createElement('button');
+      themeToggleButton.id = 'context-explainer-theme-toggle';
+      themeToggleButton.className = 'context-explainer-theme-toggle';
+      themeToggleButton.textContent = '🌙';
+      themeToggleButton.style.cssText = `
+        background: none;
+        border: 1px solid rgba(0, 0, 0, 0.2);
+        border-radius: 4px;
+        padding: 4px 8px;
+        font-size: 14px;
+        cursor: pointer;
+        transition: all 150ms ease;
+        color: #333;
+      `;
+      
+      themeToggleButton.addEventListener('mouseenter', () => {
+        const isDark = currentTheme === 'dark';
+        themeToggleButton.style.backgroundColor = isDark ? 'rgba(255, 255, 255, 0.1)' : 'rgba(0, 0, 0, 0.05)';
+      });
+      themeToggleButton.addEventListener('mouseleave', () => {
+        themeToggleButton.style.backgroundColor = 'transparent';
+      });
+      themeToggleButton.addEventListener('click', toggleTheme);
+      
+      // Create action buttons
+      const wordButton = createActionButton('context-explainer-word-button', 'Word', '📝', handleWordSelection);
+      const contextButton = createActionButton('context-explainer-context-button', 'Context', '📄', handleContextSelection);
+      
+      // Add buttons to row
+      buttonRow.appendChild(wordButton);
+      buttonRow.appendChild(contextButton);
+      buttonRow.appendChild(themeToggleButton);
+      
+      sidebarContainer.insertBefore(buttonRow, sidebarContainer.firstChild);
+    }
+    
+    // Ensure content area exists, create if missing
+    if (!sidebarContentArea && sidebarContainer) {
+      sidebarContentArea = document.createElement('div');
+      sidebarContentArea.id = 'context-explainer-sidebar-content';
+      sidebarContentArea.className = 'context-explainer-sidebar-content';
+      sidebarContentArea.style.cssText = `
+        flex: 1;
+        overflow-y: auto;
+        padding: 20px;
+      `;
+      sidebarContainer.appendChild(sidebarContentArea);
+    }
     return;
   }
   
@@ -257,7 +414,7 @@ function initializeSidebar() {
   sidebarContainer.id = 'context-explainer-sidebar';
   sidebarContainer.className = 'context-explainer-sidebar';
   
-  // Style the sidebar
+  // Style the sidebar (no overflow, will be handled by content area)
   sidebarContainer.style.cssText = `
     position: fixed;
     top: 0;
@@ -267,13 +424,213 @@ function initializeSidebar() {
     background: rgba(255, 255, 255, 0.95);
     box-shadow: -2px 0 8px rgba(0, 0, 0, 0.1);
     z-index: 10000;
-    overflow-y: auto;
-    padding: 20px;
+    display: flex;
+    flex-direction: column;
     font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
   `;
   
+  // Create button row at the top
+  const buttonRow = document.createElement('div');
+  buttonRow.id = 'context-explainer-button-row';
+  buttonRow.className = 'context-explainer-button-row';
+  buttonRow.style.cssText = `
+    background-color: rgba(248, 249, 250, 0.95);
+    padding: 10px;
+    border-bottom: 1px solid rgba(0, 0, 0, 0.1);
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+    flex-shrink: 0;
+  `;
+  
+  // Create theme toggle button
+  const themeToggleButton = document.createElement('button');
+  themeToggleButton.id = 'context-explainer-theme-toggle';
+  themeToggleButton.className = 'context-explainer-theme-toggle';
+  themeToggleButton.textContent = '🌙';
+  themeToggleButton.style.cssText = `
+    background: none;
+    border: 1px solid rgba(0, 0, 0, 0.2);
+    border-radius: 4px;
+    padding: 4px 8px;
+    font-size: 14px;
+    cursor: pointer;
+    transition: all 150ms ease;
+    color: #333;
+  `;
+  
+  // Add hover effect (will be updated by applyTheme)
+  themeToggleButton.addEventListener('mouseenter', () => {
+    const isDark = currentTheme === 'dark';
+    themeToggleButton.style.backgroundColor = isDark ? 'rgba(255, 255, 255, 0.1)' : 'rgba(0, 0, 0, 0.05)';
+  });
+  themeToggleButton.addEventListener('mouseleave', () => {
+    themeToggleButton.style.backgroundColor = 'transparent';
+  });
+  
+  // Add click handler
+  themeToggleButton.addEventListener('click', toggleTheme);
+  
+  // Create action buttons
+  const wordButton = createActionButton('context-explainer-word-button', 'Word', '📝', handleWordSelection);
+  const contextButton = createActionButton('context-explainer-context-button', 'Context', '📄', handleContextSelection);
+  
+  // Add buttons to row
+  buttonRow.appendChild(wordButton);
+  buttonRow.appendChild(contextButton);
+  buttonRow.appendChild(themeToggleButton);
+  
+  sidebarContainer.appendChild(buttonRow);
+  
+  // Create scrollable content area for cards
+  sidebarContentArea = document.createElement('div');
+  sidebarContentArea.id = 'context-explainer-sidebar-content';
+  sidebarContentArea.className = 'context-explainer-sidebar-content';
+  sidebarContentArea.style.cssText = `
+    flex: 1;
+    overflow-y: auto;
+    padding: 20px;
+  `;
+  
+  sidebarContainer.appendChild(sidebarContentArea);
+  
   // Add to page
   document.body.appendChild(sidebarContainer);
+}
+
+// Load theme from storage
+async function loadTheme() {
+  try {
+    const result = await chrome.storage.local.get(['theme']);
+    const savedTheme = result.theme || 'light';
+    currentTheme = savedTheme;
+    applyTheme(savedTheme);
+  } catch (error) {
+    console.error('Error loading theme:', error);
+    applyTheme('light');
+  }
+}
+
+// Apply theme to sidebar and cards
+function applyTheme(theme) {
+  currentTheme = theme;
+  
+  if (!sidebarContainer) return;
+  
+  const buttonRow = document.getElementById('context-explainer-button-row');
+  const themeToggleButton = document.getElementById('context-explainer-theme-toggle');
+  const wordButton = document.getElementById('context-explainer-word-button');
+  const contextButton = document.getElementById('context-explainer-context-button');
+  const cards = sidebarContainer.querySelectorAll('.context-explainer-card');
+  
+  if (theme === 'dark') {
+    // Dark mode styles
+    sidebarContainer.style.background = 'rgba(45, 45, 45, 0.95)';
+    sidebarContainer.style.color = '#e0e0e0';
+    
+    if (buttonRow) {
+      buttonRow.style.backgroundColor = 'rgba(40, 40, 40, 0.95)';
+      buttonRow.style.borderBottomColor = 'rgba(255, 255, 255, 0.2)';
+    }
+    
+    if (themeToggleButton) {
+      themeToggleButton.textContent = '☀️';
+      themeToggleButton.style.color = '#e0e0e0';
+      themeToggleButton.style.borderColor = 'rgba(255, 255, 255, 0.3)';
+    }
+    
+    // Update action buttons
+    if (wordButton) {
+      wordButton.style.color = '#e0e0e0';
+      wordButton.style.borderColor = 'rgba(255, 255, 255, 0.3)';
+    }
+    if (contextButton) {
+      contextButton.style.color = '#e0e0e0';
+      contextButton.style.borderColor = 'rgba(255, 255, 255, 0.3)';
+    }
+    
+    // Update all cards
+    cards.forEach(card => {
+      card.style.background = '#3d3d3d';
+      card.style.color = '#e0e0e0';
+      
+      const heading = card.querySelector('h3');
+      if (heading) {
+        heading.style.color = '#e0e0e0';
+      }
+      
+      const body = card.querySelector('.context-explainer-card-body');
+      if (body) {
+        if (body.style.color !== '#d32f2f') {
+          body.style.color = '#e0e0e0';
+        }
+      }
+      
+      const closeButton = card.querySelector('.context-explainer-card-close');
+      if (closeButton) {
+        closeButton.style.color = '#999';
+      }
+    });
+  } else {
+    // Light mode styles
+    sidebarContainer.style.background = 'rgba(255, 255, 255, 0.95)';
+    sidebarContainer.style.color = '#333';
+    
+    if (buttonRow) {
+      buttonRow.style.backgroundColor = 'rgba(248, 249, 250, 0.95)';
+      buttonRow.style.borderBottomColor = 'rgba(0, 0, 0, 0.1)';
+    }
+    
+    if (themeToggleButton) {
+      themeToggleButton.textContent = '🌙';
+      themeToggleButton.style.color = '#333';
+      themeToggleButton.style.borderColor = 'rgba(0, 0, 0, 0.2)';
+    }
+    
+    // Update action buttons
+    if (wordButton) {
+      wordButton.style.color = '#333';
+      wordButton.style.borderColor = 'rgba(0, 0, 0, 0.2)';
+    }
+    if (contextButton) {
+      contextButton.style.color = '#333';
+      contextButton.style.borderColor = 'rgba(0, 0, 0, 0.2)';
+    }
+    
+    // Update all cards
+    cards.forEach(card => {
+      card.style.background = 'white';
+      card.style.color = '#333';
+      
+      const heading = card.querySelector('h3');
+      if (heading) {
+        heading.style.color = '#333';
+      }
+      
+      const body = card.querySelector('.context-explainer-card-body');
+      if (body) {
+        if (body.style.color !== '#d32f2f') {
+          body.style.color = '#333';
+        }
+      }
+      
+      const closeButton = card.querySelector('.context-explainer-card-close');
+      if (closeButton) {
+        closeButton.style.color = '#999';
+      }
+    });
+  }
+}
+
+// Toggle theme between light and dark
+function toggleTheme() {
+  const newTheme = currentTheme === 'light' ? 'dark' : 'light';
+  applyTheme(newTheme);
+  
+  // Save to storage
+  chrome.storage.local.set({ theme: newTheme }).catch(error => {
+    console.error('Error saving theme:', error);
+  });
 }
 
 // Query Ollama API via background service worker (to avoid CORS issues)
@@ -313,10 +670,20 @@ function addPlaceholderCard() {
   const card = document.createElement('div');
   card.className = 'context-explainer-card';
   
+  // Get current theme colors
+  const isDark = currentTheme === 'dark';
+  const cardBg = isDark ? '#3d3d3d' : 'white';
+  const textColor = isDark ? '#e0e0e0' : '#333';
+  const headingColor = isDark ? '#e0e0e0' : '#333';
+  const bodyColor = isDark ? '#e0e0e0' : '#666';
+  const closeColor = '#999';
+  const hoverColor = isDark ? '#e0e0e0' : '#333';
+  
   // Style the card (position: relative for absolute positioning of close button)
   card.style.cssText = `
     position: relative;
-    background: white;
+    background: ${cardBg};
+    color: ${textColor};
     border-radius: 8px;
     padding: 16px;
     margin-bottom: 16px;
@@ -339,23 +706,23 @@ function addPlaceholderCard() {
       background: none;
       border: none;
       font-size: 20px;
-      color: #999;
+      color: ${closeColor};
       cursor: pointer;
       padding: 4px 8px;
       line-height: 1;
       transition: color 150ms ease;
     ">×</button>
-    <h3 style="margin: 0 0 8px 0; font-size: 18px; font-weight: 600; color: #333;">${headingText}</h3>
-    <p class="context-explainer-card-body" style="margin: 0; font-size: 14px; color: #666; line-height: 1.5;">Loading explanation...</p>
+    <h3 style="margin: 0 0 8px 0; font-size: 18px; font-weight: 600; color: ${headingColor};">${headingText}</h3>
+    <p class="context-explainer-card-body" style="margin: 0; font-size: 14px; color: ${bodyColor}; line-height: 1.5;">Loading explanation...</p>
   `;
   
   // Add hover effect for close button
   const closeButton = card.querySelector('.context-explainer-card-close');
   closeButton.addEventListener('mouseenter', () => {
-    closeButton.style.color = '#333';
+    closeButton.style.color = hoverColor;
   });
   closeButton.addEventListener('mouseleave', () => {
-    closeButton.style.color = '#999';
+    closeButton.style.color = closeColor;
   });
   
   // Add click event listener to close button
@@ -371,15 +738,20 @@ function addPlaceholderCard() {
     }, 200);
   });
   
-  // Add card to sidebar
-  sidebarContainer.appendChild(card);
+  // Add card to scrollable content area
+  if (sidebarContentArea) {
+    sidebarContentArea.appendChild(card);
+  } else {
+    // Fallback to sidebarContainer if content area doesn't exist
+    sidebarContainer.appendChild(card);
+  }
   
   // Query Ollama API and update card
   const cardBody = card.querySelector('.context-explainer-card-body');
   queryOllama(InitialText || 'Unknown', contextText || '')
     .then(explanation => {
       cardBody.textContent = explanation;
-      cardBody.style.color = '#333';
+      cardBody.style.color = isDark ? '#e0e0e0' : '#333';
     })
     .catch(error => {
       cardBody.textContent = 'Failed to fetch explanation. Is Ollama running?';
