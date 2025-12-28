@@ -276,6 +276,32 @@ function initializeSidebar() {
   document.body.appendChild(sidebarContainer);
 }
 
+// Query Ollama API via background service worker (to avoid CORS issues)
+function queryOllama(word, context) {
+  return new Promise((resolve, reject) => {
+    chrome.runtime.sendMessage(
+      {
+        type: 'queryLLM',
+        word: word,
+        context: context
+      },
+      (response) => {
+        // Check for errors in response
+        if (chrome.runtime.lastError) {
+          reject(new Error(chrome.runtime.lastError.message));
+          return;
+        }
+        
+        if (response && response.success) {
+          resolve(response.explanation);
+        } else {
+          reject(new Error(response?.error || 'Unknown error'));
+        }
+      }
+    );
+  });
+}
+
 // Add placeholder card to sidebar
 function addPlaceholderCard() {
   // Ensure sidebar exists
@@ -304,7 +330,7 @@ function addPlaceholderCard() {
   // Get the initial text (fallback to "Unknown" if not set)
   const headingText = InitialText ? `${InitialText} - ${currentTime}` : `Unknown - ${currentTime}`;
   
-  // Create card content with close button
+  // Create card content with close button and loading state
   card.innerHTML = `
     <button class="context-explainer-card-close" style="
       position: absolute;
@@ -320,7 +346,7 @@ function addPlaceholderCard() {
       transition: color 150ms ease;
     ">×</button>
     <h3 style="margin: 0 0 8px 0; font-size: 18px; font-weight: 600; color: #333;">${headingText}</h3>
-    <p style="margin: 0; font-size: 14px; color: #666; line-height: 1.5;">This is a placeholder explanation card. Real explanations will appear here.</p>
+    <p class="context-explainer-card-body" style="margin: 0; font-size: 14px; color: #666; line-height: 1.5;">Loading explanation...</p>
   `;
   
   // Add hover effect for close button
@@ -347,6 +373,19 @@ function addPlaceholderCard() {
   
   // Add card to sidebar
   sidebarContainer.appendChild(card);
+  
+  // Query Ollama API and update card
+  const cardBody = card.querySelector('.context-explainer-card-body');
+  queryOllama(InitialText || 'Unknown', contextText || '')
+    .then(explanation => {
+      cardBody.textContent = explanation;
+      cardBody.style.color = '#333';
+    })
+    .catch(error => {
+      cardBody.textContent = 'Failed to fetch explanation. Is Ollama running?';
+      cardBody.style.color = '#d32f2f';
+      console.error('Failed to fetch explanation:', error);
+    });
 }
 
 // Add CSS animations via style tag if not already present
