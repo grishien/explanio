@@ -64,11 +64,17 @@ function toggleSidebarVisibility() {
   });
 }
 
-// Message listener for toggle action
+// Message listener for toggle action and context menu actions
 chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
   if (request.action === 'toggleSidebar') {
     toggleSidebarVisibility();
     sendResponse({ success: true, visible: sidebarVisible });
+  } else if (request.action === 'handleWordSelection') {
+    handleWordSelection(request.selectionText);
+    sendResponse({ success: true });
+  } else if (request.action === 'handleContextSelection') {
+    handleContextSelection(request.selectionText);
+    sendResponse({ success: true });
   }
   return true; // Keep message channel open for async response
 });
@@ -77,22 +83,35 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
 document.addEventListener('keydown', handleKeyboardShortcut);
 
 // Handle word selection (initial selection)
-function handleWordSelection() {
+function handleWordSelection(providedText = null) {
   const selection = window.getSelection();
-  const text = selection.toString().trim();
+  let text = providedText || selection.toString().trim();
+  
+  // If no text from selection and no provided text, try to get from selection
+  if (!text && selection.rangeCount > 0) {
+    text = selection.toString().trim();
+  }
   
   if (text && text.length > 3) {
     // Store initial text in global variable
     InitialText = text;
     
-    // Capture the selected text and its position
-    captureSelection(selection, text);
+    // If we have a valid selection range, capture it; otherwise use provided text
+    if (selection.rangeCount > 0) {
+      captureSelection(selection, text);
+      // Add yellow/orange highlight overlay
+      addHighlightOverlay(selection);
+    } else if (providedText) {
+      // If selection was cleared but we have the text, try to find and highlight it
+      // For now, just store the text without visual highlight
+      capturedSelectionData = {
+        text: text,
+        timestamp: Date.now()
+      };
+    }
     
     // Log to console
     console.log('Initial selection:', text);
-    
-    // Add yellow/orange highlight overlay
-    addHighlightOverlay(selection);
     
     // Show instruction overlay
     showInstructionOverlay();
@@ -102,7 +121,7 @@ function handleWordSelection() {
 }
 
 // Handle context selection
-function handleContextSelection() {
+function handleContextSelection(providedText = null) {
   // Check if we have an initial selection
   if (!capturedSelectionData) {
     console.log('Error: No initial selection found. Please select a word/phrase first');
@@ -110,7 +129,12 @@ function handleContextSelection() {
   }
   
   const selection = window.getSelection();
-  const context = selection.toString().trim();
+  let context = providedText || selection.toString().trim();
+  
+  // If no text from selection and no provided text, try to get from selection
+  if (!context && selection.rangeCount > 0) {
+    context = selection.toString().trim();
+  }
   
   if (!context || context.length === 0) {
     console.log('Error: No text selected for context');
@@ -523,6 +547,9 @@ function applyTheme(theme) {
   const contextButton = document.getElementById('context-explainer-context-button');
   const cards = sidebarContainer.querySelectorAll('.context-explainer-card');
   
+  // Update popup theme if open
+  updatePopupTheme();
+  
   if (theme === 'dark') {
     // Dark mode styles
     sidebarContainer.style.background = 'rgba(45, 45, 45, 0.95)';
@@ -726,7 +753,8 @@ function addPlaceholderCard() {
   });
   
   // Add click event listener to close button
-  closeButton.addEventListener('click', () => {
+  closeButton.addEventListener('click', (e) => {
+    e.stopPropagation(); // Prevent card click from triggering
     // Fade out animation
     card.style.opacity = '0';
     
@@ -737,6 +765,23 @@ function addPlaceholderCard() {
       }
     }, 200);
   });
+  
+  // Store InitialText and timestamp in data attributes for popup
+  card.dataset.initialText = InitialText || 'Unknown';
+  card.dataset.timestamp = currentTime;
+  
+  // Add click event listener to card (but not on close button)
+  card.addEventListener('click', (e) => {
+    // Don't trigger if clicking the close button
+    if (e.target.classList.contains('context-explainer-card-close')) {
+      return;
+    }
+    // Show popup with card details
+    showCardPopup(card);
+  });
+  
+  // Add cursor pointer to indicate card is clickable
+  card.style.cursor = 'pointer';
   
   // Add card to scrollable content area
   if (sidebarContentArea) {
@@ -752,12 +797,313 @@ function addPlaceholderCard() {
     .then(explanation => {
       cardBody.textContent = explanation;
       cardBody.style.color = isDark ? '#e0e0e0' : '#333';
+      // Store context text as hidden data attribute after LLM response is received
+      if (contextText) {
+        card.dataset.context = contextText;
+      }
     })
     .catch(error => {
       cardBody.textContent = 'Failed to fetch explanation. Is Ollama running?';
       cardBody.style.color = '#d32f2f';
       console.error('Failed to fetch explanation:', error);
+      // Store context text even if there's an error
+      if (contextText) {
+        card.dataset.context = contextText;
+      }
     });
+}
+
+// Variable to track popup overlay
+let popupOverlay = null;
+let popupModal = null;
+
+// Show popup with card details
+function showCardPopup(card) {
+  // Remove existing popup if present
+  if (popupOverlay) {
+    closeCardPopup();
+  }
+  
+  // Get card data
+  const initialText = card.dataset.initialText || 'Unknown';
+  const timestamp = card.dataset.timestamp || '';
+  const explanation = card.querySelector('.context-explainer-card-body')?.textContent || 'No explanation available';
+  const contextText = card.dataset.context || 'No context available';
+  
+  // Get current theme
+  const isDark = currentTheme === 'dark';
+  
+  // Create backdrop overlay
+  popupOverlay = document.createElement('div');
+  popupOverlay.className = 'context-explainer-popup-overlay';
+  popupOverlay.style.cssText = `
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background: rgba(0, 0, 0, 0.5);
+    z-index: 10001;
+    opacity: 0;
+    transition: opacity 250ms ease-out;
+  `;
+  
+  // Create modal container
+  popupModal = document.createElement('div');
+  popupModal.className = 'context-explainer-popup-modal';
+  const modalBg = isDark ? '#3d3d3d' : 'white';
+  const modalText = isDark ? '#e0e0e0' : '#333';
+  const modalHeading = isDark ? '#e0e0e0' : '#333';
+  const modalSection = isDark ? '#4a4a4a' : '#f8f9fa';
+  const modalBorder = isDark ? 'rgba(255, 255, 255, 0.2)' : 'rgba(0, 0, 0, 0.1)';
+  const closeColor = isDark ? '#999' : '#666';
+  const closeHover = isDark ? '#e0e0e0' : '#333';
+  
+  popupModal.style.cssText = `
+    position: fixed;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    width: 600px;
+    max-width: 90vw;
+    max-height: 80vh;
+    background: ${modalBg};
+    color: ${modalText};
+    border-radius: 12px;
+    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
+    z-index: 10002;
+    display: flex;
+    flex-direction: column;
+    opacity: 0;
+    transition: opacity 250ms ease-out;
+    overflow: hidden;
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+  `;
+  
+  // Create close button
+  const closeButton = document.createElement('button');
+  closeButton.className = 'context-explainer-popup-close';
+  closeButton.innerHTML = '×';
+  closeButton.style.cssText = `
+    position: absolute;
+    top: 12px;
+    right: 12px;
+    background: none;
+    border: none;
+    font-size: 28px;
+    color: ${closeColor};
+    cursor: pointer;
+    padding: 4px 8px;
+    line-height: 1;
+    transition: color 150ms ease;
+    z-index: 1;
+    width: 32px;
+    height: 32px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 4px;
+  `;
+  
+  closeButton.addEventListener('mouseenter', () => {
+    closeButton.style.color = closeHover;
+    closeButton.style.backgroundColor = isDark ? 'rgba(255, 255, 255, 0.1)' : 'rgba(0, 0, 0, 0.05)';
+  });
+  closeButton.addEventListener('mouseleave', () => {
+    closeButton.style.color = closeColor;
+    closeButton.style.backgroundColor = 'transparent';
+  });
+  closeButton.addEventListener('click', (e) => {
+    e.stopPropagation();
+    closeCardPopup();
+  });
+  
+  // Create scrollable content area
+  const contentArea = document.createElement('div');
+  contentArea.style.cssText = `
+    overflow-y: auto;
+    padding: 24px;
+    flex: 1;
+  `;
+  
+  // Create heading
+  const heading = document.createElement('h2');
+  heading.style.cssText = `
+    margin: 0 0 20px 0;
+    font-size: 22px;
+    font-weight: 600;
+    color: ${modalHeading};
+    padding-right: 40px;
+  `;
+  heading.textContent = `${initialText} - ${timestamp}`;
+  
+  // Create explanation section
+  const explanationSection = document.createElement('div');
+  explanationSection.style.cssText = `
+    margin-bottom: 24px;
+  `;
+  
+  const explanationLabel = document.createElement('h3');
+  explanationLabel.style.cssText = `
+    margin: 0 0 12px 0;
+    font-size: 16px;
+    font-weight: 600;
+    color: ${modalHeading};
+  `;
+  explanationLabel.textContent = 'Explanation:';
+  
+  const explanationText = document.createElement('p');
+  explanationText.style.cssText = `
+    margin: 0;
+    font-size: 14px;
+    line-height: 1.6;
+    color: ${modalText};
+    background: ${modalSection};
+    padding: 16px;
+    border-radius: 8px;
+    border: 1px solid ${modalBorder};
+    white-space: pre-wrap;
+    word-wrap: break-word;
+  `;
+  explanationText.textContent = explanation;
+  
+  explanationSection.appendChild(explanationLabel);
+  explanationSection.appendChild(explanationText);
+  
+  // Create context section
+  const contextSection = document.createElement('div');
+  contextSection.style.cssText = `
+    margin-bottom: 0;
+  `;
+  
+  const contextLabel = document.createElement('h3');
+  contextLabel.style.cssText = `
+    margin: 0 0 12px 0;
+    font-size: 16px;
+    font-weight: 600;
+    color: ${modalHeading};
+  `;
+  contextLabel.textContent = 'Context:';
+  
+  const contextTextEl = document.createElement('p');
+  contextTextEl.style.cssText = `
+    margin: 0;
+    font-size: 14px;
+    line-height: 1.6;
+    color: ${modalText};
+    background: ${modalSection};
+    padding: 16px;
+    border-radius: 8px;
+    border: 1px solid ${modalBorder};
+    white-space: pre-wrap;
+    word-wrap: break-word;
+  `;
+  contextTextEl.textContent = contextText;
+  
+  contextSection.appendChild(contextLabel);
+  contextSection.appendChild(contextTextEl);
+  
+  // Assemble content
+  contentArea.appendChild(heading);
+  contentArea.appendChild(explanationSection);
+  contentArea.appendChild(contextSection);
+  
+  popupModal.appendChild(closeButton);
+  popupModal.appendChild(contentArea);
+  
+  // Add backdrop click handler
+  popupOverlay.addEventListener('click', (e) => {
+    if (e.target === popupOverlay) {
+      closeCardPopup();
+    }
+  });
+  
+  // Add ESC key handler
+  const escHandler = (e) => {
+    if (e.key === 'Escape' && popupOverlay) {
+      closeCardPopup();
+    }
+  };
+  document.addEventListener('keydown', escHandler);
+  popupOverlay._escHandler = escHandler;
+  
+  // Add to DOM
+  document.body.appendChild(popupOverlay);
+  document.body.appendChild(popupModal);
+  
+  // Trigger fade-in animation
+  requestAnimationFrame(() => {
+    popupOverlay.style.opacity = '1';
+    popupModal.style.opacity = '1';
+  });
+}
+
+// Close popup with fade-out animation
+function closeCardPopup() {
+  if (!popupOverlay || !popupModal) {
+    return;
+  }
+  
+  // Remove ESC handler
+  if (popupOverlay._escHandler) {
+    document.removeEventListener('keydown', popupOverlay._escHandler);
+  }
+  
+  // Fade out
+  popupOverlay.style.opacity = '0';
+  popupModal.style.opacity = '0';
+  
+  // Remove from DOM after animation
+  setTimeout(() => {
+    if (popupOverlay && popupOverlay.parentNode) {
+      popupOverlay.remove();
+    }
+    if (popupModal && popupModal.parentNode) {
+      popupModal.remove();
+    }
+    popupOverlay = null;
+    popupModal = null;
+  }, 250);
+}
+
+// Update popup theme when theme changes
+function updatePopupTheme() {
+  if (!popupModal) {
+    return;
+  }
+  
+  const isDark = currentTheme === 'dark';
+  const modalBg = isDark ? '#3d3d3d' : 'white';
+  const modalText = isDark ? '#e0e0e0' : '#333';
+  const modalHeading = isDark ? '#e0e0e0' : '#333';
+  const modalSection = isDark ? '#4a4a4a' : '#f8f9fa';
+  const modalBorder = isDark ? 'rgba(255, 255, 255, 0.2)' : 'rgba(0, 0, 0, 0.1)';
+  const closeColor = isDark ? '#999' : '#666';
+  
+  popupModal.style.background = modalBg;
+  popupModal.style.color = modalText;
+  
+  const heading = popupModal.querySelector('h2');
+  if (heading) {
+    heading.style.color = modalHeading;
+  }
+  
+  const labels = popupModal.querySelectorAll('h3');
+  labels.forEach(label => {
+    label.style.color = modalHeading;
+  });
+  
+  const sections = popupModal.querySelectorAll('p');
+  sections.forEach(section => {
+    section.style.color = modalText;
+    section.style.background = modalSection;
+    section.style.borderColor = modalBorder;
+  });
+  
+  const closeButton = popupModal.querySelector('.context-explainer-popup-close');
+  if (closeButton) {
+    closeButton.style.color = closeColor;
+  }
 }
 
 // Add CSS animations via style tag if not already present

@@ -160,6 +160,62 @@ chrome.runtime.onInstalled.addListener((details) => {
       popupDelay: 300,
       popupPosition: 'below'
     });
+    
+    // Create context menu items
+    createContextMenuItems();
+  } else if (details.reason === 'update') {
+    // Recreate context menu items on update (in case they were removed)
+    createContextMenuItems();
+  }
+});
+
+// Create context menu items
+function createContextMenuItems() {
+  // Remove ALL existing context menu items to start fresh
+  chrome.contextMenus.removeAll(() => {
+    // Create "Select Word/Phrase" context menu item at TOP LEVEL (no parentId)
+    chrome.contextMenus.create({
+      id: 'selectWord',
+      title: 'Select Word/Phrase',
+      contexts: ['selection']
+      // NO parentId - ensures it appears at TOP LEVEL, not in submenu
+    });
+    
+    // Create "Select Context" context menu item at TOP LEVEL (no parentId)
+    chrome.contextMenus.create({
+      id: 'selectContext',
+      title: 'Select Context',
+      contexts: ['selection']
+      // NO parentId - ensures it appears at TOP LEVEL, not in submenu
+    });
+    
+    console.log('Context menu items created at TOP LEVEL');
+  });
+}
+
+// Create context menu items when service worker starts (Manifest V3)
+createContextMenuItems();
+
+// Listen for context menu clicks
+chrome.contextMenus.onClicked.addListener((info, tab) => {
+  if (info.menuItemId === 'selectWord') {
+    // Send message to content script to trigger handleWordSelection()
+    // Pass the selected text in case the selection is cleared
+    chrome.tabs.sendMessage(tab.id, {
+      action: 'handleWordSelection',
+      selectionText: info.selectionText
+    }).catch(error => {
+      console.error('Error sending message to content script:', error);
+    });
+  } else if (info.menuItemId === 'selectContext') {
+    // Send message to content script to trigger handleContextSelection()
+    // Pass the selected text in case the selection is cleared
+    chrome.tabs.sendMessage(tab.id, {
+      action: 'handleContextSelection',
+      selectionText: info.selectionText
+    }).catch(error => {
+      console.error('Error sending message to content script:', error);
+    });
   }
 });
 
