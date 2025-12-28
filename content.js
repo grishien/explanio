@@ -6,13 +6,22 @@ let capturedSelectionData = null;
 let highlightOverlay = null;
 let instructionOverlay = null;
 
+// Global variable for initial text
+let InitialText = null;
+
+// Variable for context selection
+let contextText = null;
+
 // Keyboard event listener for Ctrl+Alt+NumpadSubtract
 document.addEventListener('keydown', handleKeyboardShortcut);
 
-// Handle Ctrl+Alt+NumpadSubtract keyboard shortcut
+// Handle keyboard shortcuts
 function handleKeyboardShortcut(event) {
-  // Check for Ctrl+Alt+NumpadSubtract
-  if ((event.ctrlKey || event.metaKey) && event.altKey && event.code === 'NumpadSubtract') {
+  const isCtrlOrMeta = event.ctrlKey || event.metaKey;
+  const isAlt = event.altKey;
+  
+  // Check for Ctrl+Alt+NumpadSubtract (initial selection)
+  if (isCtrlOrMeta && isAlt && event.code === 'NumpadSubtract') {
     event.preventDefault();
     event.stopPropagation();
     
@@ -20,6 +29,9 @@ function handleKeyboardShortcut(event) {
     const text = selection.toString().trim();
     
     if (text && text.length > 3) {
+      // Store initial text in global variable
+      InitialText = text;
+      
       // Capture the selected text and its position
       captureSelection(selection, text);
       
@@ -31,6 +43,43 @@ function handleKeyboardShortcut(event) {
       
       // Show instruction overlay
       showInstructionOverlay();
+    }
+  }
+  // Check for Ctrl+Alt+Numpad+ or Ctrl+Alt+= (context selection)
+  else if (isCtrlOrMeta && isAlt && (event.code === 'NumpadAdd')) {
+    event.preventDefault();
+    event.stopPropagation();
+    
+    // Check if we have an initial selection
+    if (!capturedSelectionData) {
+      console.log('Error: No initial selection found. Please select a word/phrase first with Ctrl+Alt+Numpad-');
+      return;
+    }
+    
+    const selection = window.getSelection();
+    const context = selection.toString().trim();
+    
+    if (!context || context.length === 0) {
+      console.log('Error: No text selected for context');
+      return;
+    }
+    
+    // Validate that context includes the original selection
+    const originalText = capturedSelectionData.text;
+    if (!context.includes(originalText)) {
+      console.log('Error: Context must include the original selection');
+      return;
+    }
+    
+    // Validation passed - store context and log
+    contextText = context;
+    console.log('Context text:', context);
+    console.log('Original word/phrase:', originalText);
+    
+    // Remove instruction overlay
+    if (instructionOverlay) {
+      instructionOverlay.remove();
+      instructionOverlay = null;
     }
   }
 }
