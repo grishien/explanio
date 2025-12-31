@@ -20,10 +20,18 @@ let sidebarContentArea = null; // Scrollable content area for cards
 let sidebarVisible = true;
 
 // Variable to track current theme
-let currentTheme = 'light';
+let currentTheme = 'dark';
 
 // Variable to track sidebar transparency
 let sidebarTransparency = 95;
+
+// Global variables to store settings
+let currentSettings = {
+  llmProvider: 'ollama',
+  ollamaModel: 'deepseek-r1:8b',
+  ollamaEndpoint: 'http://localhost:11434',
+  openrouterApiKey: ''
+};
 
 // Hardcoded array of OpenRouter model names
 const OPENROUTER_MODELS = [
@@ -50,12 +58,14 @@ if (document.readyState === 'loading') {
     loadSidebarVisibility();
     loadTheme();
     loadSidebarTransparency();
+    loadSettings();
   });
 } else {
   initializeSidebar();
   loadSidebarVisibility();
   loadTheme();
   loadSidebarTransparency();
+  loadSettings();
 }
 
 // Load sidebar visibility state from storage
@@ -100,6 +110,9 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
   } else if (request.action === 'handleContextSelection') {
     handleContextSelection(request.selectionText);
     sendResponse({ success: true });
+  } else if (request.action === 'settingsUpdated') {
+    currentSettings = { ...currentSettings, ...request.settings };
+    console.log('Settings updated:', currentSettings);
   }
   return true; // Keep message channel open for async response
 });
@@ -112,37 +125,67 @@ function handleWordSelection(providedText = null) {
   const selection = window.getSelection();
   let text = providedText || selection.toString().trim();
   
+  // Debug logging
+  console.log('Word selection debug:', {
+    providedText: providedText,
+    selectionText: selection.toString(),
+    trimmedSelection: selection.toString().trim(),
+    selectionRangeCount: selection.rangeCount,
+    finalText: text
+  });
+  
   // If no text from selection and no provided text, try to get from selection
   if (!text && selection.rangeCount > 0) {
     text = selection.toString().trim();
+    console.log('Retried selection capture:', text);
+  }
+  
+  // Additional fallback: if still no text, try a small delay and capture again
+  if (!text) {
+    setTimeout(() => {
+      const delayedSelection = window.getSelection();
+      const delayedText = delayedSelection.toString().trim();
+      if (delayedText && delayedText.length > 3) {
+        console.log('Delayed capture successful:', delayedText);
+        processWordSelection(delayedText);
+      }
+    }, 100);
+    return;
   }
   
   if (text && text.length > 3) {
-    // Store initial text in global variable
-    InitialText = text;
-    
-    // If we have a valid selection range, capture it; otherwise use provided text
-    if (selection.rangeCount > 0) {
-      captureSelection(selection, text);
-      // Add yellow/orange highlight overlay
-      addHighlightOverlay(selection);
-    } else if (providedText) {
-      // If selection was cleared but we have the text, try to find and highlight it
-      // For now, just store the text without visual highlight
-      capturedSelectionData = {
-        text: text,
-        timestamp: Date.now()
-      };
-    }
-    
-    // Log to console
-    console.log('Initial selection:', text);
-    
-    // Show instruction overlay
-    showInstructionOverlay();
+    processWordSelection(text);
   } else {
-    console.log('Error: Please select at least 4 characters');
+    console.log('Error: Please select at least 4 characters. Got:', text, 'Length:', text ? text.length : 0);
   }
+}
+
+// Separate processing function to avoid code duplication
+function processWordSelection(text) {
+  // Store initial text in global variable
+  InitialText = text;
+  
+  const selection = window.getSelection();
+  
+  // If we have a valid selection range, capture it; otherwise use provided text
+  if (selection.rangeCount > 0) {
+    captureSelection(selection, text);
+    // Add yellow/orange highlight overlay
+    addHighlightOverlay(selection);
+  } else if (text) {
+    // If selection was cleared but we have the text, try to find and highlight it
+    // For now, just store the text without visual highlight
+    capturedSelectionData = {
+      text: text,
+      timestamp: Date.now()
+    };
+  }
+  
+  // Log to console
+  console.log('Initial selection:', text);
+  
+  // Show instruction overlay
+  showInstructionOverlay();
 }
 
 // Handle context selection
@@ -159,6 +202,11 @@ function handleContextSelection(providedText = null) {
   // If no text from selection and no provided text, try to get from selection
   if (!context && selection.rangeCount > 0) {
     context = selection.toString().trim();
+  }
+  
+  // Ensure context is a string
+  if (typeof context !== 'string') {
+    context = String(context);
   }
   
   if (!context || context.length === 0) {
@@ -582,6 +630,17 @@ async function loadSidebarTransparency() {
   }
 }
 
+// Load settings from storage
+function loadSettings() {
+  chrome.storage.sync.get(['llmProvider', 'ollamaModel', 'ollamaEndpoint', 'openrouterApiKey'], (result) => {
+    if (result.llmProvider) currentSettings.llmProvider = result.llmProvider;
+    if (result.ollamaModel) currentSettings.ollamaModel = result.ollamaModel;
+    if (result.ollamaEndpoint) currentSettings.ollamaEndpoint = result.ollamaEndpoint;
+    if (result.openrouterApiKey) currentSettings.openrouterApiKey = result.openrouterApiKey;
+    console.log('Settings loaded:', currentSettings);
+  });
+}
+
 // Apply transparency to sidebar container
 function applySidebarTransparency() {
   if (sidebarContainer) {
@@ -724,6 +783,56 @@ function toggleTheme() {
   });
 }
 
+// Query OpenRouter API directly
+async function queryOpenRouter(word, context) {
+  try {
+    if (!currentSettings.openrouterApiKey) {
+      throw new Error('OpenRouter API key not found. Please add it in the extension settings.');
+    }
+    
+    // Select random model and log it
+    const selectedModel = getRandomOpenRouterModel();
+    console.log('Using OpenRouter model:', selectedModel);
+    
+    // Create prompt using the same template as Ollama
+    const prompt = `You are a helpful assistant. Explain the meaning of the word/phrase "${word}" in the following context:\n\nContext: "${context}"\n\nPlease provide a clear, concise explanation of what "${word}" means in this context. Focus on its specific meaning here rather than general definitions.`;
+    
+    const response = await fetch('https://openrouter.ai/api/v1/chat/completions', {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${currentSettings.openrouterApiKey}`,
+        'Content-Type': 'application/json',
+        'HTTP-Referer': window.location.href
+      },
+      body: JSON.stringify({
+        model: selectedModel,
+        messages: [
+          {
+            role: 'user',
+            content: prompt
+          }
+        ]
+      })
+    });
+    
+    if (!response.ok) {
+      const errorData = await response.json().catch(() => ({ error: 'Unknown error' }));
+      throw new Error(`OpenRouter API error: ${response.status} - ${errorData.error?.message || errorData.error || 'Request failed'}`);
+    }
+    
+    const data = await response.json();
+    
+    if (!data.choices || !data.choices[0] || !data.choices[0].message) {
+      throw new Error('Invalid response format from OpenRouter API');
+    }
+    
+    return data.choices[0].message.content;
+  } catch (error) {
+    console.error('OpenRouter API error:', error);
+    throw error;
+  }
+}
+
 // Query Ollama API via background service worker (to avoid CORS issues)
 function queryOllama(word, context) {
   return new Promise((resolve, reject) => {
@@ -748,6 +857,24 @@ function queryOllama(word, context) {
       }
     );
   });
+}
+
+// Unified LLM query function that checks provider setting
+async function queryLLM(word, context) {
+  try {
+    console.log('Using provider:', currentSettings.llmProvider);
+    
+    if (currentSettings.llmProvider === 'openrouter') {
+      console.log('Using OpenRouter provider');
+      return await queryOpenRouter(word, context);
+    } else {
+      console.log('Using Ollama provider');
+      return await queryOllama(word, context);
+    }
+  } catch (error) {
+    console.error('LLM query error:', error);
+    throw error;
+  }
 }
 
 // Add placeholder card to sidebar
@@ -853,9 +980,9 @@ function addPlaceholderCard() {
     sidebarContainer.appendChild(card);
   }
   
-  // Query Ollama API and update card
+  // Query LLM API and update card (supports both Ollama and OpenRouter)
   const cardBody = card.querySelector('.context-explainer-card-body');
-  queryOllama(InitialText || 'Unknown', contextText || '')
+  queryLLM(InitialText || 'Unknown', contextText || '')
     .then(explanation => {
       cardBody.textContent = explanation;
       cardBody.style.color = isDark ? '#e0e0e0' : '#333';
@@ -865,7 +992,7 @@ function addPlaceholderCard() {
       }
     })
     .catch(error => {
-      cardBody.textContent = 'Failed to fetch explanation. Is Ollama running?';
+      cardBody.textContent = 'Failed to fetch explanation. Please check your settings and API configuration.';
       cardBody.style.color = '#d32f2f';
       console.error('Failed to fetch explanation:', error);
       // Store context text even if there's an error
