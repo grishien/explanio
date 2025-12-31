@@ -25,6 +25,24 @@ let currentTheme = 'light';
 // Variable to track sidebar transparency
 let sidebarTransparency = 95;
 
+// Hardcoded array of OpenRouter model names
+const OPENROUTER_MODELS = [
+  "nvidia/nemotron-3-nano-30b-a3b:free",
+  "qwen/qwen3-4b:free",
+  "z-ai/glm-4.5-air:free",
+  "qwen/qwen-2.5-vl-7b-instruct:free",
+  "xiaomi/mimo-v2-flash:free",
+  "deepseek/deepseek-r1-0528:free"
+];
+
+// Helper function to randomly select a model
+function getRandomOpenRouterModel() {
+  return OPENROUTER_MODELS[Math.floor(Math.random() * OPENROUTER_MODELS.length)];
+}
+
+// Temporary test - remove this later
+console.log('Testing random model:', getRandomOpenRouterModel());
+
 // Initialize sidebar when DOM is ready
 if (document.readyState === 'loading') {
   document.addEventListener('DOMContentLoaded', () => {

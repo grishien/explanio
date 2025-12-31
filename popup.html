@@ -102,6 +102,29 @@
     </div>
   </div>
 
+  <div class="setting-group">
+    <label for="llmProvider">LLM Provider</label>
+    <select id="llmProvider">
+      <option value="ollama">Ollama</option>
+      <option value="openrouter">OpenRouter</option>
+    </select>
+  </div>
+
+  <div class="setting-group" id="openrouterApiKeyGroup" style="display: none;">
+    <label for="openrouterApiKey">OpenRouter API Key</label>
+    <input type="password" id="openrouterApiKey" placeholder="sk-or-v1-...">
+  </div>
+
+  <div class="setting-group" id="ollamaModelGroup">
+    <label for="ollamaModel">Ollama Model Name</label>
+    <input type="text" id="ollamaModel" placeholder="e.g., llama2, codellama, mistral">
+  </div>
+
+  <div class="setting-group" id="ollamaEndpointGroup">
+    <label for="ollamaEndpoint">Ollama Endpoint URL</label>
+    <input type="text" id="ollamaEndpoint" placeholder="e.g., http://localhost:11434">
+  </div>
+
   <button id="saveBtn">Save Settings</button>
   
   <div class="setting-group" style="margin-top: 20px;">
