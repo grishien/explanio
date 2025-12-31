@@ -1,4 +1,4 @@
-// Background service worker for Context Explainer extension
+// Background service worker for ExplainIO extension
 
 // Listen for messages from content scripts
 chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {

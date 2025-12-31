@@ -1,4 +1,4 @@
-// Content script for Context Explainer extension - Phase 2
+// Content script for ExplainIO extension - Phase 2
 
 // Variables for initial selection capture
 let capturedSelection = null;
@@ -30,7 +30,7 @@ let currentSettings = {
   llmProvider: 'ollama',
   ollamaModel: 'deepseek-r1:8b',
   ollamaEndpoint: 'http://localhost:11434',
-  openrouterApiKey: ''
+  openrouterApiKey: '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'
 };
 
 // Hardcoded array of OpenRouter model names
